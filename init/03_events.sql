@@ -1,7 +1,7 @@
 -- =====================================================
 -- MySQL EVENT scheduler jobs
--- ต้องเปิด event_scheduler=ON (ตั้งไว้แล้วใน docker-compose command)
--- ตรวจสถานะ: SHOW VARIABLES LIKE 'event_scheduler'; SHOW EVENTS;
+-- Requires event_scheduler=ON (already set via docker-compose command)
+-- Check status: SHOW VARIABLES LIKE 'event_scheduler'; SHOW EVENTS;
 --
 -- NOTE: demo schedules are aggressive (every 1 min) so you can
 -- watch them fire — production schedules noted per event.
@@ -11,7 +11,8 @@ DELIMITER $$
 
 -- -----------------------------------------------------
 -- 1) Seed exchange rates every minute
---    (จำลอง external FX feed: random walk ±0.5% จากเรทล่าสุดของแต่ละคู่เงิน)
+--    (simulates an external FX feed: random walk ±0.5% from the latest
+--    rate of each currency pair)
 --    production: EVERY 1 HOUR
 -- -----------------------------------------------------
 CREATE EVENT ev_update_exchange_rates
@@ -44,8 +45,8 @@ END$$
 
 -- -----------------------------------------------------
 -- 2) Upsert daily sales summary
---    production: EVERY 1 DAY STARTS ... 01:00 (สรุปของเมื่อวาน)
---    demo: ทุก 1 นาที สรุปของ "วันนี้" ให้เห็นตัวเลขขยับ
+--    production: EVERY 1 DAY STARTS ... 01:00 (summarizing yesterday)
+--    demo: every minute over recent days so you can watch numbers move
 -- -----------------------------------------------------
 CREATE EVENT ev_daily_sales_summary
 ON SCHEDULE EVERY 1 MINUTE

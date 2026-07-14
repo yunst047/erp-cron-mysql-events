@@ -1,6 +1,6 @@
 # ERP Cron Demo — MySQL Event Scheduler
 
-ERP schema บน MySQL 8 ใช้ **built-in Event Scheduler** (`CREATE EVENT`) update/seed ข้อมูล — ไม่ต้องมี service ภายนอกเลย logic ทั้งหมดอยู่ใน DB
+ERP schema on MySQL 8 using the **built-in Event Scheduler** (`CREATE EVENT`) to update/seed data on a schedule — no external service required, all logic lives inside the database.
 
 ## Run
 
@@ -8,43 +8,42 @@ ERP schema บน MySQL 8 ใช้ **built-in Event Scheduler** (`CREATE EVENT`
 docker compose up -d
 ```
 
-Init scripts รันตามลำดับ: `01_schema.sql` → `02_seed.sql` → `03_events.sql`
-Event scheduler เปิดผ่าน `command: --event-scheduler=ON` ใน compose
+Init scripts run in order: `01_schema.sql` → `02_seed.sql` → `03_events.sql`
+The event scheduler is enabled via `command: --event-scheduler=ON` in the compose file.
 
 ## Events
 
-| Event | Demo schedule | Production | ทำอะไร |
+| Event | Demo schedule | Production | What it does |
 |---|---|---|---|
-| `ev_update_exchange_rates` | 1 min | 1 hour | seed FX rate ใหม่ต่อคู่เงิน (random walk ±0.5%) เก็บ history |
-| `ev_daily_sales_summary` | 1 min | daily 01:00 | upsert ยอดขายรวมรายวันลง `daily_sales_summary` |
-| `ev_mark_overdue_invoices` | 1 min | daily 00:30 | `pending` → `overdue` เมื่อเลย due date |
-| `ev_check_low_stock` | 1 min | 1 hour | insert `stock_alerts` เมื่อ stock ≤ reorder level |
-| `ev_cleanup` | 1 hour | daily | ลบ log เก่า 7 วัน / FX history เก่า 30 วัน |
+| `ev_update_exchange_rates` | 1 min | 1 hour | Seeds a new FX rate per currency pair (random walk ±0.5%), keeps history |
+| `ev_daily_sales_summary` | 1 min | daily 01:00 | Upserts daily sales totals into `daily_sales_summary` |
+| `ev_mark_overdue_invoices` | 1 min | daily 00:30 | Flips `pending` → `overdue` once past the due date |
+| `ev_check_low_stock` | 1 min | 1 hour | Inserts `stock_alerts` when stock ≤ reorder level |
+| `ev_cleanup` | 1 hour | daily | Deletes logs older than 7 days / FX history older than 30 days |
 
-## Verify ว่า cron วิ่งจริง
+## Verify the events are firing
 
 ```bash
 docker exec -it erp-mysql-events mysql -uerp -perp erp
 ```
 
 ```sql
-SHOW VARIABLES LIKE 'event_scheduler';   -- ต้องเป็น ON
-SHOW EVENTS;                             -- เห็น 5 events
+SHOW VARIABLES LIKE 'event_scheduler';   -- must be ON
+SHOW EVENTS;                             -- should list 5 events
 
--- รอ ~1 นาทีแล้วดู
+-- wait ~1 minute, then:
 SELECT * FROM cron_job_logs ORDER BY run_at DESC LIMIT 10;
 SELECT * FROM exchange_rates ORDER BY fetched_at DESC LIMIT 8;
-SELECT * FROM invoices WHERE status = 'overdue';     -- INV-1001, INV-1003 โดน flip
-SELECT * FROM stock_alerts;                          -- product 2 (qty 6 ≤ 10), 7 (qty 12 ≤ 25)
+SELECT * FROM invoices WHERE status = 'overdue';     -- INV-1001, INV-1003 get flipped
+SELECT * FROM stock_alerts;                          -- product 2 (qty 6 ≤ 10), 7 (qty 12 ≤ 25), ...
 SELECT * FROM daily_sales_summary;
 ```
 
-## ข้อควรรู้
+## Things to know
 
-- Event หายถ้า `event_scheduler=OFF` ตอน restart → ตั้งใน config/command เสมอ ไม่ใช่ `SET GLOBAL`
-- Event รันด้วยสิทธิ์ของ definer — ระวังตอน migrate ระหว่าง server
-- ไม่มี retry/backoff ในตัว — ถ้า statement fail จะเงียบ (ดูได้จาก `performance_schema.events_errors` หรือ error log) จึงให้ทุก event เขียน `cron_job_logs` ไว้ตรวจ
-
+- Events stop firing if `event_scheduler=OFF` after a restart → always set it in config/command, never via `SET GLOBAL` alone
+- Events run with the definer's privileges — watch out when migrating between servers
+- No built-in retry/backoff — a failing statement fails silently (visible in `performance_schema.events_errors` or the error log), which is why every event also writes to `cron_job_logs`
 
 ---
 
